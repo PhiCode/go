@@ -1,4 +1,4 @@
-.PHONY: ci dev
+.PHONY: ci dev coverage
 
 packages = github.com/PhiCode/go/...
 
@@ -16,6 +16,15 @@ test:
 
 bench:
 	go test -bench=.* -cpu=1,2,4,8,16 $(packages)
+
+#TODO
+#coverage:
+#	mkdir -p coverage
+#	go get -u -v github.com/axw/gocov/gocov
+#	go get -u -v github.com/AlekSi/gocov-xml
+#	go test -coverprofile=coverage/pubsub.out github.com/PhiCode/go/pubsub
+#	gocov convert coverage/pubsub.out > coverage/pubsub.json
+#	gocov-xml < coverage/pubsub.json > coverage/pubsub.xml
 
 src:
 	gofmt -w -s .
