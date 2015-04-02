@@ -94,6 +94,7 @@ func benchPublishReceive(b *testing.B, consumers int) {
 }
 
 func benchConsumer(b *testing.B, sub Subscription, wg *sync.WaitGroup, numMsg int) {
+	defer sub.Unsubscribe()
 	var sum int
 	for i := 0; i < numMsg; i++ {
 		sum += sub.Receive().(int)
