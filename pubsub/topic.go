@@ -18,16 +18,19 @@ type Topic interface {
 	// Publish publishes a new message to all subscribers.
 	Publish(msg interface{})
 
-	NumSubscribers() int
-
+	// Subscribe creates a new Subscription on which newly published messages can be received.
 	Subscribe() Subscription
+
+	// NumSubscribers returns the current number of subscribers.
+	NumSubscribers() int
 }
 
 type Subscription interface {
+	// C returns the receive-only channel on which newly published messages are received.
 	C() <-chan interface{}
 
 	// Unsubscribe frees the resources which are associated with this Subscription.
-	// Consumers of this API must call Unsubscribe.
+	// Consumers must call Unsubscribe to prevent memory/goroutine leaks.
 	Unsubscribe()
 }
 
@@ -90,11 +93,12 @@ func (t *ct) Subscribe() Subscription {
 		recv:    make(chan interface{}),
 		stop:    make(chan struct{}),
 	}
-	go sub.sender()
+	go sub.subscriberLoop()
 	return sub
 }
 
 func (s *cs) C() <-chan interface{} { return s.recv }
+
 func (s *cs) Unsubscribe() {
 	s.t.mu.Lock()
 	s.t.numSub--
@@ -102,7 +106,7 @@ func (s *cs) Unsubscribe() {
 	close(s.stop)
 }
 
-func (s *cs) sender() {
+func (s *cs) subscriberLoop() {
 	defer func() {
 		s.current = nil
 		close(s.recv)
