@@ -36,12 +36,40 @@ func TestNumSubscribers(t *testing.T) {
 	}
 	select {
 	case x := <-sub.C():
-		t.Fatalf("received unexpected: %v", x)
+		t.Fatalf("received unexpected message: %v", x)
 	default:
 	}
 	sub.Unsubscribe()
 	if n := topic.NumSubscribers(); n != 0 {
 		t.Fatalf("number of subscribers missmatch, got: %d, want: 0", n)
+	}
+}
+
+func TestNoHighWaterMark(t *testing.T) {
+	var N = 1000000
+	if testing.Short() {
+		N = 1000
+	}
+	topic := NewTopic()
+	sub := topic.Subscribe()
+	for i := 0; i < N; i++ {
+		topic.Publish(i)
+	}
+	c := sub.C()
+	for i := 0; i < N; i++ {
+		select {
+		case got := <-c:
+			if got != i {
+				t.Fatalf("wrong delivery order - got: %d, want: %d", got, i)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("message was not delivered: %d", i)
+		}
+	}
+	select {
+	case x := <-sub.C():
+		t.Fatalf("received unexpected message: %v", x)
+	default:
 	}
 }
 
@@ -71,8 +99,9 @@ func benchPublishReceive(b *testing.B, consumers int) {
 func benchConsumer(b *testing.B, sub Subscription, wg *sync.WaitGroup, numMsg int) {
 	defer sub.Unsubscribe()
 	var sum int
+	c := sub.C()
 	for i := 0; i < numMsg; i++ {
-		sum += (<-sub.C()).(int)
+		sum += (<-c).(int)
 	}
 	var wsum = (numMsg * (numMsg + 1)) / 2
 	if sum != wsum {

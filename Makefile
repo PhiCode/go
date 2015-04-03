@@ -15,7 +15,7 @@ test:
 	go test -cover $(packages)
 
 bench:
-	go test -bench=.* -cpu=1,2,4,8,16 $(packages)
+	go test -v -bench=.* -cpu=1,2,4,8,16 $(packages)
 
 #TODO
 #coverage:
