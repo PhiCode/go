@@ -4,69 +4,44 @@
 package pubsub
 
 import (
-	"fmt"
 	"sync"
 	"testing"
 	"time"
 )
 
-func TestSendReceive(t *testing.T) {
+func TestReceive(t *testing.T) {
 	topic := NewTopic()
 	sub := topic.Subscribe()
-	topic.Publish("test")
-	if m := sub.Receive(); m != "test" {
-		t.Errorf("Received: %q", m)
+	topic.Publish("a")
+	topic.Publish("b")
+	a, ok := <-sub.C()
+	if a != "a" || !ok {
+		t.Errorf("subscription receive got (%v, %v), want: (a, true)", a, ok)
+	}
+	sub.Unsubscribe()
+	// give the sender goroutine the opportunity to shut down
+	time.Sleep(25 * time.Millisecond)
+	b, ok := <-sub.C()
+	if b != nil || ok {
+		t.Errorf("unsubscribed subscription receive got (%v, %v), want: (nil, false)", b, ok)
 	}
 }
 
-func TestSendReceiveNow(t *testing.T) {
+func TestNumSubscribers(t *testing.T) {
 	topic := NewTopic()
+	topic.Publish("stuff")
 	sub := topic.Subscribe()
-	for i := 0; i < 100000; i++ {
-		topic.Publish(i)
+	if n := topic.NumSubscribers(); n != 1 {
+		t.Fatalf("number of subscribers missmatch, got: %d, want: 1", n)
 	}
-	for i := 0; i < 100000; i++ {
-		v, ok := sub.ReceiveNow()
-		if v != i || !ok {
-			t.Errorf("got: (%v, %v), want: (%v,%v)", v, ok, i, true)
-		}
+	select {
+	case x := <-sub.C():
+		t.Fatalf("received unexpected: %v", x)
+	default:
 	}
-	v, ok := sub.ReceiveNow()
-	if v != nil || ok {
-		t.Errorf("got: (%v, %v), want: (%v,%v)", v, ok, nil, false)
-	}
-}
-
-func TestLatest(t *testing.T) {
-	topic := NewTopic()
-	sub := topic.Subscribe()
-	topic.Publish("1")
-	topic.Publish("2")
-	if v := sub.Latest(); v != "2" {
-		fmt.Errorf("got %q, want %q", v, "2")
-	}
-	v, ok := sub.LatestNow()
-	if v != nil || ok {
-		t.Errorf("got: (%v, %v), want: (%v,%v)", v, ok, nil, false)
-	}
-}
-
-func TestReceiveTimeout(t *testing.T) {
-	topic := NewTopic()
-	a := topic.Subscribe()
-	ready := make(chan bool, 1)
-	done := make(chan bool, 1)
-	go func() {
-		ready <- true
-		x, okx := a.ReceiveTimeout(time.Hour)
-		y, oky := a.ReceiveTimeout(100 * time.Millisecond)
-		done <- (x == 31415 && okx == true && y == nil && oky == false)
-	}()
-	<-ready
-	time.Sleep(10 * time.Millisecond)
-	topic.Publish(31415)
-	if !<-done {
-		t.Errorf("ReceiveTimeout is not done")
+	sub.Unsubscribe()
+	if n := topic.NumSubscribers(); n != 0 {
+		t.Fatalf("number of subscribers missmatch, got: %d, want: 0", n)
 	}
 }
 
@@ -97,7 +72,7 @@ func benchConsumer(b *testing.B, sub Subscription, wg *sync.WaitGroup, numMsg in
 	defer sub.Unsubscribe()
 	var sum int
 	for i := 0; i < numMsg; i++ {
-		sum += sub.Receive().(int)
+		sum += (<-sub.C()).(int)
 	}
 	var wsum = (numMsg * (numMsg + 1)) / 2
 	if sum != wsum {
