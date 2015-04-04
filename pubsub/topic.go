@@ -1,6 +1,7 @@
 // Copyright 2015 Philipp Meinen. All rights reserved.
 // Use of this source code is governed by the MIT license that can be found in the LICENSE file.
 
+// Package pubsub implements a fan-out message distribution in form a topic.
 package pubsub
 
 import (
@@ -9,7 +10,9 @@ import (
 	"time"
 )
 
-// A Topic is used to distribute messages to multiple consumers/subscriptions
+// A Topic is used to distribute messages to multiple consumers.
+// Published messages are guaranteed to be delivered in-order.
+// If an optional "high water mark" (HWM) is set, messages for slow consumsers may be dropped.
 type Topic interface {
 	// Publish publishes a new message to all subscribers.
 	Publish(msg interface{})
@@ -27,11 +30,11 @@ type Topic interface {
 	SetHWM(hwm int)
 }
 
-// Subscription is a topic subscription of one consumer.
+// Subscription is the topic subscription of one consumer.
 // Messages which are published on the subscribed Topic are delivered at most once but may be consumed from any goroutine.
 type Subscription interface {
 	// C returns the receive-only consumer channel on which newly published messages are received.
-	// Unsubscribing from a subscription will close this consumer channel.
+	// Unsubscribing from a Subscription will close this consumer channel.
 	// The consumer channel can therefore be used in a for-range construct.
 	C() <-chan interface{}
 
@@ -40,6 +43,8 @@ type Subscription interface {
 	Unsubscribe()
 }
 
+// NewTopic creates a new message topic.
+// No high water mark is set, consumers which are lagging behind will no loose messages.
 func NewTopic() Topic { return &topic{head: newMsg()} }
 
 type topic struct {
