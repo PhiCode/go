@@ -1,7 +1,7 @@
 // Copyright 2015 Philipp Meinen. All rights reserved.
 // Use of this source code is governed by the MIT license that can be found in the LICENSE file.
 
-// Package pubsub implements a fan-out message distribution in form a topic.
+// Package pubsub implements a fan-out message distribution pattern in the form of a topic.
 package pubsub
 
 import (
