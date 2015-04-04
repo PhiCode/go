@@ -45,16 +45,15 @@ func TestNumSubscribers(t *testing.T) {
 	}
 }
 
-func TestNoHighWaterMark(t *testing.T) {
-	var N = 1000000
-	if testing.Short() {
-		N = 1000
-	}
+func TestMessageOrder(t *testing.T) {
+	const N = 1000
 	topic := NewTopic()
 	sub := topic.Subscribe()
-	for i := 0; i < N; i++ {
-		topic.Publish(i)
-	}
+	go func() {
+		for i := 0; i < N; i++ {
+			topic.Publish(i)
+		}
+	}()
 	c := sub.C()
 	for i := 0; i < N; i++ {
 		select {
@@ -63,13 +62,30 @@ func TestNoHighWaterMark(t *testing.T) {
 				t.Fatalf("wrong delivery order - got: %d, want: %d", got, i)
 			}
 		case <-time.After(time.Second):
-			t.Fatalf("message was not delivered: %d", i)
+			t.Fatalf("missing message: %d", i)
 		}
 	}
 	select {
 	case x := <-sub.C():
 		t.Fatalf("received unexpected message: %v", x)
 	default:
+	}
+}
+
+func TestHighWaterMark(t *testing.T) {
+	topic := NewTopic()
+	topic.SetHWM(1)
+
+	s := topic.Subscribe()
+	s.(*sub).hwmTicker = time.NewTicker(time.Millisecond)
+
+	topic.Publish(1)
+	topic.Publish(2)
+
+	time.Sleep(2*time.Millisecond)
+
+	if got := <-s.C(); got != 2 {
+		t.Errorf("high water mark discard failed - got: %v, want: 2", got)
 	}
 }
 
