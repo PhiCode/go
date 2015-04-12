@@ -11,7 +11,7 @@ import (
 )
 
 // A Topic is used to distribute messages to multiple consumers.
-// Published messages are guaranteed to be delivered in-order.
+// Published messages are delivered in publishing order.
 // If an optional "high water mark" (HWM) is set, messages for slow consumsers may be dropped.
 type Topic interface {
 	// Publish publishes a new message to all subscribers.
@@ -96,7 +96,7 @@ func (t *topic) Subscribe() Subscription {
 		stop:      make(chan struct{}),
 		hwmTicker: time.NewTicker(hwmCheckInterval),
 	}
-	go sub.subscriberLoop()
+	go sub.loop()
 	return sub
 }
 
@@ -136,6 +136,8 @@ func (s *sub) Unsubscribe() {
 	s.t.mu.Lock()
 	s.t.nsub--
 	s.t.mu.Unlock()
+
+	// shut down the subscriptions loop goroutine
 	close(s.stop)
 }
 
@@ -143,7 +145,7 @@ func (s *sub) Unsubscribe() {
 // TODO: expose through setter ?
 const hwmCheckInterval = 10 * time.Second
 
-func (s *sub) subscriberLoop() {
+func (s *sub) loop() {
 	defer func() {
 		close(s.recv)
 		s.hwmTicker.Stop()
@@ -188,6 +190,9 @@ func (s *sub) hwmCheck() {
 	}
 	seq := s.current.seq
 	headSeq := atomic.LoadInt64(&s.t.headSeq)
+
+	// the head points to the next non-yet-ready message
+	// => ready is 1 less than expected
 	ready := headSeq - seq
 	discard := ready - hwm
 	for discard > 0 {
