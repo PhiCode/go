@@ -1,6 +1,6 @@
 .PHONY: ci dev coverage
 
-packages = github.com/PhiCode/go/...
+packages = github.com/phicode/go/...
 
 all: install test
 ci: install test bench
@@ -22,7 +22,7 @@ bench:
 #	mkdir -p coverage
 #	go get -u -v github.com/axw/gocov/gocov
 #	go get -u -v github.com/AlekSi/gocov-xml
-#	go test -coverprofile=coverage/pubsub.out github.com/PhiCode/go/pubsub
+#	go test -coverprofile=coverage/pubsub.out github.com/phicode/go/pubsub
 #	gocov convert coverage/pubsub.out > coverage/pubsub.json
 #	gocov-xml < coverage/pubsub.json > coverage/pubsub.xml
 
