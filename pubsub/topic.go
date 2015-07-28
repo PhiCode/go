@@ -6,8 +6,6 @@ package pubsub
 
 import (
 	"sync"
-	"sync/atomic"
-	"time"
 )
 
 // A Topic is used to distribute messages to multiple consumers.
@@ -48,32 +46,32 @@ type Subscription interface {
 func NewTopic() Topic { return &topic{head: newMsg()} }
 
 type topic struct {
-	mu      sync.Mutex
-	head    *msg  // head of message chain
-	headSeq int64 // sequence number of head message, read by consumers to check for high water mark checks
-	hwm     int64 // high water mark for newly published messages
-	nsub    int   // number of subscribers
+	mu   sync.Mutex
+	head *msg // head of message chain
+	nsub int  // number of subscribers
 }
 
 var _ Topic = (*topic)(nil)
 
 func (t *topic) Publish(msg interface{}) {
-	next := newMsg()
-
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.nsub == 0 {
 		return
 	}
-	t.headSeq++
-	next.seq = t.headSeq
 
-	t.head.msg = msg
-	t.head.next = next
-	t.head.hwm = t.hwm
-	close(t.head.ready)
-	t.head = next
+	oldHead, newHead := t.head, newMsg()
+
+	newHead.seq = oldHead.seq + 1
+	newHead.hwm = oldHead.hwm
+
+	oldHead.msg = msg
+	oldHead.next = newHead
+
+	t.head = newHead
+
+	close(oldHead.ready)
 }
 
 func (t *topic) NumSubscribers() int {
@@ -90,19 +88,17 @@ func (t *topic) Subscribe() Subscription {
 	t.mu.Unlock()
 
 	sub := &sub{
-		t:         t,
-		current:   head,
-		recv:      make(chan interface{}),
-		stop:      make(chan struct{}),
-		hwmTicker: time.NewTicker(hwmCheckInterval),
+		t:    t,
+		recv: make(chan interface{}),
+		stop: make(chan struct{}),
 	}
-	go sub.loop()
+	go sub.loop(head)
 	return sub
 }
 
 func (t *topic) SetHWM(hwm int) {
 	t.mu.Lock()
-	t.hwm = int64(hwm)
+	t.head.hwm = int64(hwm)
 	t.mu.Unlock()
 }
 
@@ -110,22 +106,19 @@ func (t *topic) SetHWM(hwm int) {
 // the ready channel is closed upon message readyness
 // consumers select upon the ready channel
 type msg struct {
+	seq   int64         // message sequence number
 	ready chan struct{} // guards the fields below, a closed ready channel is indicative of message readiness
+	hwm   int64         // high water mark at message creation time
 	msg   interface{}   // the published message
 	next  *msg          // the next message holder object in the chain of published messages
-	seq   int64         // message sequence number
-	hwm   int64         // high water mark at message creation time
 }
 
 func newMsg() *msg { return &msg{ready: make(chan struct{})} }
 
 type sub struct {
-	t       *topic
-	current *msg
-	recv    chan interface{} // consumer receive channel
-	stop    chan struct{}    // unsubscribe and end subscriber loop notification channel
-
-	hwmTicker *time.Ticker // ticker for periodic high water mark checks
+	t    *topic
+	recv chan interface{} // consumer receive channel
+	stop chan struct{}    // unsubscribe and end subscriber loop notification channel
 }
 
 var _ Subscription = (*sub)(nil)
@@ -141,41 +134,34 @@ func (s *sub) Unsubscribe() {
 	close(s.stop)
 }
 
-// TODO: improve this "constant"
-// TODO: expose through setter ?
-const hwmCheckInterval = 10 * time.Second
+func (s *sub) loop(head *msg) {
+	defer close(s.recv)
 
-func (s *sub) loop() {
-	defer func() {
-		close(s.recv)
-		s.hwmTicker.Stop()
-		s.current = nil
-	}()
-
-	var ready bool
+	var cur *msg
 	for {
-		if !ready {
+		if cur == nil {
 			// receive next message or stop
 			select {
 			case <-s.stop:
 				return
-			case <-s.current.ready:
-				ready = true
-			case <-s.hwmTicker.C:
-				// no message is waiting to be consumed
-				// => no high water mark check required
-				// => do nothing
+			case <-head.ready:
+				cur = head
+				head = head.next
 			}
 		} else {
 			// deliver message or stop
 			select {
 			case <-s.stop:
 				return
-			case s.recv <- s.current.msg:
-				ready = false
-				s.current = s.current.next
-			case <-s.hwmTicker.C:
-				s.hwmCheck()
+			case s.recv <- cur.msg:
+				cur = cur.next
+				if cur == head {
+					cur = nil
+				}
+			case <-head.ready:
+				newest := head
+				head = head.next
+				cur = hwmCheck(cur, newest)
 			}
 		}
 	}
@@ -183,21 +169,15 @@ func (s *sub) loop() {
 
 // discards messages which have a message lag higher than the HWM.
 // the subscribers current message must be ready.
-func (s *sub) hwmCheck() {
-	hwm := s.current.hwm
-	if hwm < 1 {
-		return
+func hwmCheck(cur, newest *msg) *msg {
+	if newest.hwm < 1 {
+		return cur
 	}
-	seq := s.current.seq
-	headSeq := atomic.LoadInt64(&s.t.headSeq)
-
-	// the head points to the next non-yet-ready message
-	// => ready is 1 less than expected
-	ready := headSeq - seq
-	discard := ready - hwm
+	nready := newest.seq - cur.seq + 1
+	discard := nready - newest.hwm
 	for discard > 0 {
 		discard--
-		s.current = s.current.next
-		<-s.current.ready // synchronization on the current message holder
+		cur = cur.next
 	}
+	return cur
 }

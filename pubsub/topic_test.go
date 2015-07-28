@@ -62,13 +62,11 @@ func TestHighWaterMark(t *testing.T) {
 	topic.SetHWM(1)
 
 	s := topic.Subscribe()
-	// "tune" the high water mark check so that the test runs faster
-	s.(*sub).hwmTicker = time.NewTicker(time.Millisecond)
 
 	topic.Publish(1)
 	topic.Publish(2)
 
-	// wait for the high water mark check
+	// ensure that the subscriber goroutine has time to discard messages over the HWM
 	time.Sleep(5 * time.Millisecond)
 
 	if got := <-s.C(); got != 2 {
@@ -80,8 +78,9 @@ func TestHighWaterMark(t *testing.T) {
 		topic.Publish(i)
 	}
 
-	// wait for the high water mark check
+	// ensure that the subscriber goroutine has time to discard messages over the HWM
 	time.Sleep(5 * time.Millisecond)
+
 	verifyNextMessages(t, s, 90, 100)
 }
 
@@ -106,6 +105,7 @@ func verifyNextMessages(t *testing.T, sub Subscription, from, to int) {
 
 func BenchmarkPublishReceive1kSub(b *testing.B)   { benchPublishReceive(b, 1000) }
 func BenchmarkPublishReceive10kSub(b *testing.B)  { benchPublishReceive(b, 10000) }
+func BenchmarkPublishReceive50kSub(b *testing.B)  { benchPublishReceive(b, 50000) }
 func BenchmarkPublishReceive100kSub(b *testing.B) { benchPublishReceive(b, 100000) }
 
 func benchPublishReceive(b *testing.B, consumers int) {
