@@ -1,4 +1,4 @@
-.PHONY: ci dev coverage
+.PHONY: ci dev coverage bench src
 
 packages = github.com/phicode/go/...
 
@@ -17,7 +17,7 @@ test:
 bench:
 	go test -v -bench=.* -cpu=1,2,4,8,16 $(packages)
 
-#TODO
+#TODO: create and include generic go makefile for these kind of tasks
 #coverage:
 #	mkdir -p coverage
 #	go get -u -v github.com/axw/gocov/gocov
