@@ -1,9 +1,12 @@
-.PHONY: ci dev coverage bench src
+.PHONY: clean ci dev coverage bench cover src
 
 packages = github.com/phicode/go/...
 
 all: install test
 ci: install test bench
+
+clean:
+	rm -rf build
 
 dev:
 	watch -n 5 -- make install test
@@ -26,6 +29,12 @@ bench:
 #	gocov convert coverage/pubsub.out > coverage/pubsub.json
 #	gocov-xml < coverage/pubsub.json > coverage/pubsub.xml
 
+cover:
+	mkdir -p build
+	go test -coverprofile build/coverage.out $(packages)
+	go tool cover -html=build/coverage.out -o build/coverage.html
+
 src:
 	gofmt -w -s .
 	goimports -w .
+	go vet $(packages)
