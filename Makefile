@@ -1,6 +1,6 @@
 .PHONY: clean ci dev coverage bench cover src
 
-packages = github.com/phicode/go/...
+packages = $(shell go list github.com/phicode/go/...)
 
 all: install test
 ci: install test bench
@@ -20,19 +20,13 @@ test:
 bench:
 	go test -v -bench=.* -cpu=1,2,4,8,16 $(packages)
 
-#TODO: create and include generic go makefile for these kind of tasks
-#coverage:
-#	mkdir -p coverage
-#	go get -u -v github.com/axw/gocov/gocov
-#	go get -u -v github.com/AlekSi/gocov-xml
-#	go test -coverprofile=coverage/pubsub.out github.com/phicode/go/pubsub
-#	gocov convert coverage/pubsub.out > coverage/pubsub.json
-#	gocov-xml < coverage/pubsub.json > coverage/pubsub.xml
-
 cover:
 	mkdir -p build
-	go test -coverprofile build/coverage.out $(packages)
-	go tool cover -html=build/coverage.out -o build/coverage.html
+	# TODO: makefile magic to generate coverage for each package
+	go test -coverprofile build/coverage_pubsub.out github.com/phicode/go/pubsub
+	go tool cover -html=build/coverage_pubsub.out -o build/coverage_pubsub.html
+	go test -coverprofile build/coverage_path.out github.com/phicode/go/path
+	go tool cover -html=build/coverage_path.out -o build/coverage_path.html
 
 src:
 	gofmt -w -s .

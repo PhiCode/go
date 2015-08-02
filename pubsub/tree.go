@@ -1,5 +1,11 @@
 package pubsub
 
+import (
+	"sync"
+
+	"github.com/phicode/go/path"
+)
+
 // subscription:
 // - register a subscriber on the highest possible node
 // - create tree nodes if necessary
@@ -8,7 +14,7 @@ package pubsub
 // - walk the publishing path
 // - publish on all tree nodes with non-empty list of subscribers
 
-// A Topic is used to distribute messages to multiple consumers.
+// A TopicTree is used to distribute messages to multiple consumers.
 // Published messages are delivered in publishing order.
 // If an optional "high water mark" (HWM) is set, messages for slow consumsers may be dropped.
 type TopicTree interface {
@@ -18,100 +24,130 @@ type TopicTree interface {
 	// Subscribe creates a new Subscription on which newly published messages can be received.
 	Subscribe(path string) Subscription
 
+	//TODO: per level/subscriber/global? scrap altogether ?
 	// NumSubscribers returns the current number of subscribers.
-	NumSubscribers(path string) int
+	//	NumSubscribers(path string) int
 
+	//TODO: per level/subscriber/global? scrap altogether ?
 	// SetHWM sets a high water mark in number of messages.
 	// Subscribers which lag behind more messages than the high water mark will have messages discarded.
 	// A high water mark of zero means no messages will be discarded (default).
 	// Changes to the high water mark only apply to newly published messages.
-	SetHWM(path string, hwm int)
+	//	SetHWM(path string, hwm int, recursive bool)
 }
 
-type path struct {
-	path    []byte  //24b
-	slashes []int   //24b
-	scratch [10]int //80b
-	//total: 64/128 b => 1/2 cachelines
+type tt struct {
+	topic Topic
+
+	mu    sync.Mutex
+	refs  int64
+	leafs map[string]*tt
 }
 
-const pathSeparator byte = '/'
+var _ (TopicTree) = (*tt)(nil)
 
-func (p *path) initString(s string) bool {
-	p.path = []byte(s)
-	return p.init()
+func NewTopicTree() TopicTree { return newtt() }
+
+func (t *tt) Publish(treePath string, msg interface{}) {
+	path, ok := path.Parse(treePath)
+	if !ok {
+		//TODO: return an error for invalid paths?
+		return
+	}
+
+	t.publish(&path, 0, msg)
 }
 
-func (p *path) initbyte(b []byte) bool {
-	p.path = b
-	return p.init()
+func (t *tt) publish(p *path.Path, depth int, msg interface{}) {
+	t.topic.Publish(msg)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if next, ok := p.Elem(depth); ok {
+		if leaf, ok := t.leafs[next]; ok {
+			leaf.publish(p, depth+1, msg)
+		}
+	}
 }
 
+func (t *tt) Subscribe(treePath string) Subscription {
+	path, ok := path.Parse(treePath)
+	if !ok {
+		//TODO: return an error for invalid paths?
+		return nil
+	}
 
-func (p *path) init() bool {
-	path := p.path
-	l := len(path)
+	return t.subscribe(t, &path, 0)
+}
 
-	// at least the root path => '/'
-	if l < 1 || path[0] != pathSeparator {
+func (t *tt) subscribe(root *tt, p *path.Path, depth int) Subscription {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.refs++
+
+	if next, ok := p.Elem(depth); ok {
+		// subscription is not for this level, propagate to the next level in the hierarchy
+		leaf, ok := t.leafs[next]
+		if !ok {
+			leaf = newtt()
+			t.leafs[next] = leaf
+		}
+		return leaf.subscribe(root, p, depth+1)
+	}
+
+	s := t.topic.Subscribe()
+	return &ttsub{
+		root: root,
+		p:    p,
+		s:    s,
+	}
+}
+
+func (t *tt) unsubscribe(p *path.Path, depth int) int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.refs--
+
+	if next, ok := p.Elem(depth); ok {
+		// subscription is not for this level, propagate to the next level in the hierarchy
+		leaf, ok := t.leafs[next]
+		if !ok {
+			panic("invalid unsubscribe")
+		}
+		if leaf.unsubscribe(p, depth+1) == 0 {
+			delete(t.leafs, next)
+		}
+	}
+
+	return t.refs
+}
+
+type ttsub struct {
+	root *tt
+	p    *path.Path
+	s    Subscription
+}
+
+var _ Subscription = (*ttsub)(nil)
+
+func (s *ttsub) C() <-chan interface{} {
+	return s.s.C()
+}
+
+func (s *ttsub) Unsubscribe() bool {
+	if !s.s.Unsubscribe() {
 		return false
 	}
-
-	p.slashes = p.scratch[:0]
-	last := -2
-
-	for i, c := range path {
-		if c != pathSeparator {
-			continue
-		}
-		if i == last+1 {
-			// double slash
-			return false
-		}
-		last = i
-		p.slashes = append(p.slashes, i)
-	}
-	return l == 1 || l > last+1
+	s.root.unsubscribe(s.p, 0)
+	return true
 }
 
-//func (p *path) head() ([]byte, bool) {
-//	p.pos = 0
-//	return []byte{}, len(p.path) > 1
-//}
-//
-//func (p *path) tail() ([]byte, bool) {
-//	p.pos = bytes.LastIndexByte(p.path[:len(p.path)-1], pathSeparator)
-//	if p.pos == -1 {
-//		return []byte{}, false
-//	}
-//	return p.path[p.pos+1:], true
-//}
-//
-//func (p *path) resetStart() {
-//	p.pos = -1
-//}
-//func (p *path) next() ([]byte, bool) {
-//	if p.pos < 0 {
-//		p.pos = 0
-//		return []byte{}, len(p.path) > 1
-//	}
-//	start := p.pos + 1
-//	p.pos = bytes.IndexByte(p.path[start:], pathSeparator)
-//	if p.pos == -1 {
-//		return p.path[start:], false
-//	}
-//	return p.path[start:p.pos], true
-//}
-
-func (p *path) elem(i int) ([]byte, bool) {
-	s := len(p.slashes)
-	if i >= s {
-		panic("invalid element index")
+func newtt() *tt {
+	return &tt{
+		topic: NewTopic(),
+		leafs: make(map[string]*tt),
 	}
-
-	if i+1 == s { // last element
-		return p.path[p.slashes[i]+1:], false
-	}
-
-	return p.path[p.slashes[i]+1 : p.slashes[i+1]], true
 }

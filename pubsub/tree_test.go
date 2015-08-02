@@ -1,133 +1,111 @@
 package pubsub
 
 import (
+	"fmt"
+	"os"
+	"runtime"
 	"testing"
+	"time"
 )
 
-func TestPathInit(t *testing.T) {
-	var tests = []struct {
-		path  string
-		valid bool
-	}{
-		{"/", true},
-		{"a", false},
-		{"", false},
-		{"a", false},
-		{"/a", true},
-		{"/abc", true},
-		{"//", false},
-		{"//abc", false},
-		{"/a/", false},
-		{"/a/b", true},
-		{"/a/abc", true},
-		{"/a/abc/", false},
-		{"/a/abc//", false},
+func TestTopicTreeRoot(t *testing.T) {
+	tt := NewTopicTree()
+	sub := tt.Subscribe("/")
+	if sub == nil {
+		t.Fatal("subscribe failed")
 	}
 
-	for _, test := range tests {
-		p := path{path: []byte(test.path)}
-		if gotValid := p.init(); gotValid != test.valid {
-			t.Errorf("path=%q, got=%v, want=%v", test.path, gotValid, test.valid)
+	tt.Publish("/", 1)
+	tt.Publish("/a", 2)
+	tt.Publish("/b", 3)
+
+	verifyNextMessages(t, sub, 1, 4)
+
+	sub.Unsubscribe()
+
+	tt.Publish("/", "stuff")
+
+	select {
+	case got, ok := <-sub.C():
+		if ok {
+			t.Errorf("received message on unsubscribed subscriber: %v", got)
 		}
+	case <-time.After(25 * time.Millisecond):
 	}
 }
 
-//
-//func TestPathHead(t *testing.T) {
-//	var tests = []struct {
-//		path string
-//		more bool
-//	}{
-//		{"/", false},
-//		{"/a", true},
-//		{"/a/b", true},
-//	}
-//
-//	for _, test := range tests {
-//		p := path{path: []byte(test.path)}
-//		if gotHead, gotMore := p.head(); string(gotHead) != "" || gotMore != test.more {
-//			t.Errorf("path=%q, got-head=%q, want-head=%q, got-more=%v, want-more=%v",
-//				test.path, gotHead, "", gotMore, test.more)
-//		}
-//	}
-//}
-//
-//func TestPathTail(t *testing.T) {
-//	var tests = []struct {
-//		path string
-//
-//		tail string
-//		more bool
-//	}{
-//		{"/", "", false},
-//		{"/a", "a", true},
-//		{"/a/b", "b", true},
-//	}
-//
-//	for _, test := range tests {
-//		p := path{path: []byte(test.path)}
-//		if gotTail, gotMore := p.tail(); string(gotTail) != test.tail || gotMore != test.more {
-//			t.Errorf("path=%q, got-tail=%q, want-tail=%q, got-more=%v, want-more=%v",
-//				test.path, gotTail, test.tail, gotMore, test.more)
-//		}
-//	}
-//}
-//
-func TestPathElem(t *testing.T) {
-	var tests = []struct {
-		path string
-
-		next []string
-	}{
-		{"/a", []string{"a"}},
-		{"/a/b", []string{"a", "b"}},
-		{"/abc/bcd/def", []string{"abc", "bcd", "def"}},
+func TestTopicTreeSubNode(t *testing.T) {
+	tt := NewTopicTree()
+	sub := tt.Subscribe("/a")
+	defer sub.Unsubscribe()
+	if sub == nil {
+		t.Fatal("subscribe failed")
 	}
 
-	for _, test := range tests {
-		p := path{path: []byte(test.path)}
-		if p.init() == false {
-			t.Errorf("invalid path: %q", test.path)
+	tt.Publish("/", "root")
+	tt.Publish("/a", "a")
+	tt.Publish("/b", "b")
+
+	c := sub.C()
+	select {
+	case got := <-c:
+		if got != "a" {
+			t.Fatalf("wrong message, got=%q, want=\"a\"", got)
 		}
-		for i, wantNext := range test.next {
-			wantMore := i+1 < len(test.next)
-			if gotNext, gotMore := p.elem(i); string(gotNext) != wantNext || gotMore != wantMore {
-				t.Errorf("path=%q, i=%d, got-next=%q, want-next=%q, got-more=%v, want-more=%v",
-					test.path, i, gotNext, wantNext, gotMore, wantMore)
-			}
+	case <-time.After(time.Second):
+		t.Fatalf("missing message: \"a\"")
+	}
+}
+
+func TestTopicDoubleUnsubscribe(t *testing.T) {
+	tt := NewTopicTree()
+	sub1 := tt.Subscribe("/a")
+	sub2 := tt.Subscribe("/a")
+	if sub1 == nil || sub2 == nil {
+		t.Fatal("subscribe failed")
+	}
+
+	tt.Publish("/a", "a")
+
+	if !sub1.Unsubscribe() {
+		t.Error("unsubscribe failed")
+	}
+	if sub1.Unsubscribe() {
+		t.Error("double unsubscribe succeeded")
+	}
+	defer sub2.Unsubscribe()
+
+	c := sub2.C()
+	select {
+	case got := <-c:
+		if got != "a" {
+			t.Fatalf("wrong message, got=%q, want=\"a\"", got)
 		}
+	case <-time.After(time.Second):
+		t.Fatalf("missing message: \"a\"")
 	}
 }
 
-func BenchmarkPathInitFitInScratchString(b *testing.B) {
-	b.ReportAllocs()
-	ok := pathInitString(b.N, "/some/path/with/less/than/10/slashes")
-	if !ok {
-		b.Fatal("path init failed")
+const debugGoroutines = false
+
+func TestMain(m *testing.M) {
+	rv := m.Run()
+	if debugGoroutines {
+		time.Sleep(50 * time.Millisecond)
+		printGoroutines()
 	}
+	os.Exit(rv)
 }
 
-func BenchmarkPathInitFitInBytes(b *testing.B) {
-	b.ReportAllocs()
-	ok := pathInitByte(b.N, []byte("/some/path/with/less/than/10/slashes"))
-	if !ok {
-		b.Fatal("path init failed")
+func printGoroutines() {
+	buf := make([]byte, 1<<20)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		buf = make([]byte, len(buf)*2)
 	}
-}
-
-func pathInitString(n int, s string) bool {
-	ok := true
-	var  p path
-	for i := 0; i < n; i++ {
-		ok =  p.initString(s) && ok
-	}
-	return ok
-}
-func pathInitByte(n int, b []byte) bool {
-	ok := true
-	var  p path
-	for i := 0; i < n; i++ {
-		ok =  p.initbyte(b) && ok
-	}
-	return ok
+	fmt.Printf("goroutines:\n%s\n", buf)
 }
