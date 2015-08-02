@@ -30,16 +30,28 @@ func TestReceive(t *testing.T) {
 func TestNumSubscribers(t *testing.T) {
 	topic := NewTopic()
 	topic.Publish("stuff")
-	sub := topic.Subscribe()
+	sub1 := topic.Subscribe()
 	if n := topic.NumSubscribers(); n != 1 {
 		t.Fatalf("number of subscribers missmatch, got: %v, want: 1", n)
 	}
 	select {
-	case x := <-sub.C():
+	case x := <-sub1.C():
 		t.Fatalf("received unexpected message: %v", x)
 	default:
 	}
-	sub.Unsubscribe()
+
+	sub2 := topic.Subscribe()
+	if n := topic.NumSubscribers(); n != 2 {
+		t.Fatalf("number of subscribers missmatch, got: %v, want: 2", n)
+	}
+
+	sub1.Unsubscribe()
+	sub1.Unsubscribe()
+	if n := topic.NumSubscribers(); n != 1 {
+		t.Fatalf("number of subscribers missmatch, got: %v, want: 1", n)
+	}
+
+	sub2.Unsubscribe()
 	if n := topic.NumSubscribers(); n != 0 {
 		t.Fatalf("number of subscribers missmatch, got: %v, want: 0", n)
 	}
@@ -49,6 +61,7 @@ func TestMessageOrder(t *testing.T) {
 	const N = 1000
 	topic := NewTopic()
 	sub := topic.Subscribe()
+	defer sub.Unsubscribe()
 	go func() {
 		for i := 0; i < N; i++ {
 			topic.Publish(i)
@@ -61,7 +74,8 @@ func TestHighWaterMark(t *testing.T) {
 	topic := NewTopic()
 	topic.SetHWM(1)
 
-	s := topic.Subscribe()
+	sub := topic.Subscribe()
+	defer sub.Unsubscribe()
 
 	topic.Publish(1)
 	topic.Publish(2)
@@ -69,7 +83,7 @@ func TestHighWaterMark(t *testing.T) {
 	// ensure that the subscriber goroutine has time to discard messages over the HWM
 	time.Sleep(5 * time.Millisecond)
 
-	if got := <-s.C(); got != 2 {
+	if got := <-sub.C(); got != 2 {
 		t.Errorf("high water mark discard failed - got: %v, want: 2", got)
 	}
 
@@ -81,7 +95,7 @@ func TestHighWaterMark(t *testing.T) {
 	// ensure that the subscriber goroutine has time to discard messages over the HWM
 	time.Sleep(5 * time.Millisecond)
 
-	verifyNextMessages(t, s, 90, 100)
+	verifyNextMessages(t, sub, 90, 100)
 }
 
 func verifyNextMessages(t *testing.T, sub Subscription, from, to int) {

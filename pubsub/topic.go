@@ -6,6 +6,7 @@ package pubsub
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 // A Topic is used to distribute messages to multiple consumers.
@@ -38,7 +39,7 @@ type Subscription interface {
 
 	// Unsubscribe frees the resources which are associated with this Subscription.
 	// Consumers must call Unsubscribe to prevent memory/goroutine leaks.
-	Unsubscribe()
+	Unsubscribe() bool
 }
 
 // NewTopic creates a new message topic.
@@ -46,20 +47,21 @@ type Subscription interface {
 func NewTopic() Topic { return &topic{head: newMsg()} }
 
 type topic struct {
+	nsub int64 // number of subscribers - atomically mutated
+
 	mu   sync.Mutex
 	head *msg // head of message chain
-	nsub int  // number of subscribers
 }
 
 var _ Topic = (*topic)(nil)
 
 func (t *topic) Publish(msg interface{}) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.nsub == 0 {
+	if atomic.LoadInt64(&t.nsub) <= 0 {
 		return
 	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	oldHead, newHead := t.head, newMsg()
 
@@ -75,22 +77,20 @@ func (t *topic) Publish(msg interface{}) {
 }
 
 func (t *topic) NumSubscribers() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	return t.nsub
+	return int(atomic.LoadInt64(&t.nsub))
 }
 
 func (t *topic) Subscribe() Subscription {
 	t.mu.Lock()
 	head := t.head
-	t.nsub++
+	atomic.AddInt64(&t.nsub, 1)
 	t.mu.Unlock()
 
 	sub := &sub{
-		t:    t,
-		recv: make(chan interface{}),
-		stop: make(chan struct{}),
+		subscribed: 1,
+		t:          t,
+		recv:       make(chan interface{}),
+		stop:       make(chan struct{}),
 	}
 	go sub.loop(head)
 	return sub
@@ -116,22 +116,24 @@ type msg struct {
 func newMsg() *msg { return &msg{ready: make(chan struct{})} }
 
 type sub struct {
-	t    *topic
-	recv chan interface{} // consumer receive channel
-	stop chan struct{}    // unsubscribe and end subscriber loop notification channel
+	subscribed int32
+	t          *topic
+	recv       chan interface{} // consumer receive channel
+	stop       chan struct{}    // unsubscribe and end subscriber loop notification channel
 }
 
 var _ Subscription = (*sub)(nil)
 
 func (s *sub) C() <-chan interface{} { return s.recv }
 
-func (s *sub) Unsubscribe() {
-	s.t.mu.Lock()
-	s.t.nsub--
-	s.t.mu.Unlock()
-
+func (s *sub) Unsubscribe() bool {
+	if !atomic.CompareAndSwapInt32(&s.subscribed, 1, 0) {
+		return false
+	}
+	atomic.AddInt64(&s.t.nsub, -1)
 	// shut down the subscriptions loop goroutine
 	close(s.stop)
+	return true
 }
 
 func (s *sub) loop(head *msg) {
