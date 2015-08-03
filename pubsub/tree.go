@@ -4,9 +4,9 @@
 package pubsub
 
 import (
+	"fmt"
 	"sync"
 
-	"fmt"
 	"github.com/phicode/go/path"
 )
 
