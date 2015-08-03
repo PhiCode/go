@@ -109,3 +109,29 @@ func printGoroutines() {
 	}
 	fmt.Printf("goroutines:\n%s\n", buf)
 }
+
+func TestTopicTreePublishPanic(t *testing.T) {
+	defer func() {
+		const want = `invalid path: "testpanic"`
+		if err := recover(); err.(error).Error() != want {
+			t.Errorf("TopicTree.Publish panic missmatch, got=%v, want=%v", err, want)
+		}
+	}()
+
+	tt := NewTopicTree()
+	tt.Publish("testpanic", "message")
+	t.Error("TopicTree.Publish did not panic for an invalid path")
+}
+
+func TestTopicTreeSubscribePanic(t *testing.T) {
+	defer func() {
+		const want = `invalid path: "testpanic"`
+		if err := recover(); err.(error).Error() != want {
+			t.Errorf("TopicTree.Publish panic missmatch, got=%v, want=%v", err, want)
+		}
+	}()
+
+	tt := NewTopicTree()
+	tt.Subscribe("testpanic")
+	t.Error("TopicTree.Publish did not panic for an invalid path")
+}

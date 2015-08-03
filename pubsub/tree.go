@@ -3,44 +3,44 @@ package pubsub
 import (
 	"sync"
 
+	"fmt"
 	"github.com/phicode/go/path"
 )
 
-// subscription:
-// - register a subscriber on the highest possible node
-// - create tree nodes if necessary
-//
-// publishing:
-// - walk the publishing path
-// - publish on all tree nodes with non-empty list of subscribers
-
-// A TopicTree is used to distribute messages to multiple consumers.
-// Published messages are delivered in publishing order.
-// If an optional "high water mark" (HWM) is set, messages for slow consumsers may be dropped.
+// A TopicTree is a hierarchical structure of topics.
+// Subscriber can subscribe on:
+// - the root level to receive all messages
+// - a 'leaf' level to receive a subset of messages, filtered for the specific path
+// Published messages delivered to the root and all leafs of the publishing path.
 type TopicTree interface {
-	// Publish publishes a new message to all subscribers.
+	// Publish publishes a new message to the tree.
+	// Publish panics if the supplied path is not valid.
 	Publish(path string, msg interface{})
 
-	// Subscribe creates a new Subscription on which newly published messages can be received.
+	// PublishPath publishes a new message to the tree.
+	PublishPath(path *path.Path, msg interface{})
+
+	// Subscribe creates a new Subscription on the tree.
+	// Subscribe panics if the supplied path is not valid.
 	Subscribe(path string) Subscription
 
-	//TODO: per level/subscriber/global? scrap altogether ?
-	// NumSubscribers returns the current number of subscribers.
-	//	NumSubscribers(path string) int
+	// SubscribePath creates a new Subscription on the tree.
+	SubscribePath(path *path.Path) Subscription
 
 	//TODO: per level/subscriber/global? scrap altogether ?
-	// SetHWM sets a high water mark in number of messages.
-	// Subscribers which lag behind more messages than the high water mark will have messages discarded.
-	// A high water mark of zero means no messages will be discarded (default).
-	// Changes to the high water mark only apply to newly published messages.
-	//	SetHWM(path string, hwm int, recursive bool)
+	//NumSubscribers(path string) int
+
+	//TODO: per level/subscriber/global? scrap altogether ?
+	//SetHWM(path string, hwm int, recursive bool)
+
+	//TODO: subscriptions where the path of the received message is communicated
 }
 
 type tt struct {
 	topic Topic
 
 	mu    sync.Mutex
-	refs  int64
+	refs  int64 // the number of subscriptions on this level or on child trees
 	leafs map[string]*tt
 }
 
@@ -51,13 +51,17 @@ func NewTopicTree() TopicTree { return newtt() }
 func (t *tt) Publish(treePath string, msg interface{}) {
 	path, ok := path.Parse(treePath)
 	if !ok {
-		//TODO: return an error for invalid paths?
-		return
+		panic(fmt.Errorf("invalid path: %q", treePath))
 	}
-
-	t.publish(&path, 0, msg)
+	t.PublishPath(&path, msg)
+}
+func (t *tt) PublishPath(path *path.Path, msg interface{}) {
+	t.publish(path, 0, msg)
 }
 
+// publishing:
+// - walk the tree until the final leaf is reached
+// - publish the message on the topics of all leafs on the way
 func (t *tt) publish(p *path.Path, depth int, msg interface{}) {
 	t.topic.Publish(msg)
 
@@ -74,13 +78,18 @@ func (t *tt) publish(p *path.Path, depth int, msg interface{}) {
 func (t *tt) Subscribe(treePath string) Subscription {
 	path, ok := path.Parse(treePath)
 	if !ok {
-		//TODO: return an error for invalid paths?
-		return nil
+		panic(fmt.Errorf("invalid path: %q", treePath))
 	}
-
-	return t.subscribe(t, &path, 0)
+	return t.SubscribePath(&path)
+}
+func (t *tt) SubscribePath(path *path.Path) Subscription {
+	return t.subscribe(t, path, 0)
 }
 
+// subscription:
+// - walk the tree until the requested leaf is reached
+// - create non-existent leafs on the way
+// - register on the leafs topic
 func (t *tt) subscribe(root *tt, p *path.Path, depth int) Subscription {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -105,6 +114,10 @@ func (t *tt) subscribe(root *tt, p *path.Path, depth int) Subscription {
 	}
 }
 
+// unsubscribe:
+// - walk the tree until the final leaf is reached
+// - unsubscribe from the leaf
+// - remove all unused leafs
 func (t *tt) unsubscribe(p *path.Path, depth int) int64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
