@@ -44,7 +44,7 @@ type TopicTree interface {
 type tt struct {
 	topic Topic
 
-	rwmu    sync.RWMutex
+	rwmu  sync.RWMutex
 	refs  int64 // the number of subscriptions on this level or on child trees
 	leafs map[string]*tt
 }
