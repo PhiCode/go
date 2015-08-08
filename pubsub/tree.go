@@ -37,12 +37,14 @@ type TopicTree interface {
 	//SetHWM(path string, hwm int, recursive bool)
 
 	//TODO: subscriptions where the path of the received message is communicated
+
+	List() map[string]int
 }
 
 type tt struct {
 	topic Topic
 
-	mu    sync.Mutex
+	rwmu    sync.RWMutex
 	refs  int64 // the number of subscriptions on this level or on child trees
 	leafs map[string]*tt
 }
@@ -68,8 +70,8 @@ func (t *tt) PublishPath(path *path.Path, msg interface{}) {
 func (t *tt) publish(p *path.Path, depth int, msg interface{}) {
 	t.topic.Publish(msg)
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.rwmu.RLock()
+	defer t.rwmu.RUnlock()
 
 	if next, ok := p.Elem(depth); ok {
 		if leaf, ok := t.leafs[next]; ok {
@@ -94,8 +96,8 @@ func (t *tt) SubscribePath(path *path.Path) Subscription {
 // - create non-existent leafs on the way
 // - register on the leafs topic
 func (t *tt) subscribe(root *tt, p *path.Path, depth int) Subscription {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.rwmu.Lock()
+	defer t.rwmu.Unlock()
 
 	t.refs++
 
@@ -122,8 +124,8 @@ func (t *tt) subscribe(root *tt, p *path.Path, depth int) Subscription {
 // - unsubscribe from the leaf
 // - remove all unused leafs
 func (t *tt) unsubscribe(p *path.Path, depth int) int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.rwmu.Lock()
+	defer t.rwmu.Unlock()
 
 	t.refs--
 
@@ -139,6 +141,25 @@ func (t *tt) unsubscribe(p *path.Path, depth int) int64 {
 	}
 
 	return t.refs
+}
+
+func (t *tt) List() map[string]int {
+	m := make(map[string]int)
+	t.list(m, "/")
+	return m
+}
+
+func (t *tt) list(m map[string]int, path string) {
+	t.rwmu.RLock()
+	defer t.rwmu.RUnlock()
+
+	m[path] = t.topic.NumSubscribers()
+	if len(path) > 1 {
+		path += "/"
+	}
+	for leafPath, leaf := range t.leafs {
+		leaf.list(m, path+leafPath)
+	}
 }
 
 type ttsub struct {
