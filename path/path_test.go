@@ -7,85 +7,39 @@ import (
 	"testing"
 )
 
-func TestParse(t *testing.T) {
-	var tests = []struct {
-		path string
-		ok   bool
-	}{
-		{"/", true},
-		{"a", false},
-		{"", false},
-		{"a", false},
-		{"/a", true},
-		{"/abc", true},
-		{"//", false},
-		{"//abc", false},
-		{"/a/", false},
-		{"/a/b", true},
-		{"/a/abc", true},
-		{"/a/abc/", false},
-		{"/a/abc//", false},
-	}
-
-	for _, test := range tests {
-		_, ok := Parse(test.path)
-		if ok != test.ok {
-			t.Errorf("path=%q, got=%v, want=%v", test.path, ok, test.ok)
-		}
-	}
-}
-
-func TestElem(t *testing.T) {
+func TestSplit(t *testing.T) {
 	var tests = []struct {
 		path string
 
-		next []string
+		out []string
 	}{
+		{"", []string{}},
 		{"/", []string{}},
+		{"//", []string{}},
+
+		{"a", []string{"a"}},
 		{"/a", []string{"a"}},
+		{"/a/", []string{"a"}},
+		{"//a//", []string{"a"}},
+
+		{"a/b", []string{"a", "b"}},
 		{"/a/b", []string{"a", "b"}},
+		{"/a//b/", []string{"a", "b"}},
+
 		{"/abc/bcd/def", []string{"abc", "bcd", "def"}},
 		{"/ä/ö/ü/···", []string{"ä", "ö", "ü", "···"}},
 	}
 
 	for _, test := range tests {
-		path, ok := Parse(test.path)
-		if !ok {
-			t.Errorf("invalid path: %q", test.path)
+		path := Split(test.path)
+		if len(test.out) != len(path) {
+			t.Errorf("invalid path length, want=%d (%v), got=%d (%v)", len(test.out), test.out, len(path), path)
+			continue
 		}
-		for i, wantElem := range test.next {
-			if gotElem, ok := path.Elem(i); gotElem != wantElem || !ok {
-				t.Errorf("path=%q, i=%d, got-elem=%q, want-elem=%q, got-ok=%v, want-ok=true",
-					test.path, i, gotElem, wantElem, ok)
+		for i, want := range test.out {
+			if got := path[i]; got != want {
+				t.Errorf("path=%q, i=%d, got=%q, want=%q", test.path, i, got, want)
 			}
 		}
-		if elem, ok := path.Elem(len(test.next)); elem != "" || ok {
-			t.Errorf("read past path end succeeded, got=(%v, %v), want=(nil, false)", elem, ok)
-		}
 	}
-}
-
-func BenchmarkParseFitInScratch(b *testing.B) {
-	b.ReportAllocs()
-	ok := nTimesParse(b.N, "/path/with/six/elements/uses/scratchpad")
-	if !ok {
-		b.Fatal("path init failed")
-	}
-}
-
-func BenchmarkParseTooLongForScratch(b *testing.B) {
-	b.ReportAllocs()
-	ok := nTimesParse(b.N, "/path/with/more/than/six/elements/requires/additional/allocations")
-	if !ok {
-		b.Fatal("path init failed")
-	}
-}
-
-func nTimesParse(n int, s string) bool {
-	allok := true
-	for i := 0; i < n; i++ {
-		_, ok := Parse(s)
-		allok = allok && ok
-	}
-	return allok
 }
