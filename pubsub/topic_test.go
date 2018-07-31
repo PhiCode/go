@@ -67,7 +67,7 @@ func TestMessageOrder(t *testing.T) {
 			topic.Publish(i)
 		}
 	}()
-	verifyNextMessages(t, sub, 0, N)
+	verifyNextMessagesRange(t, sub, 0, N)
 }
 
 func TestHighWaterMark(t *testing.T) {
@@ -95,25 +95,42 @@ func TestHighWaterMark(t *testing.T) {
 	// ensure that the subscriber goroutine has time to discard messages over the HWM
 	time.Sleep(5 * time.Millisecond)
 
-	verifyNextMessages(t, sub, 90, 100)
+	verifyNextMessagesRange(t, sub, 90, 100)
 }
 
-func verifyNextMessages(t *testing.T, sub Subscription, from, to int) {
-	c := sub.C()
-	for i := from; i < to; i++ {
-		select {
-		case got := <-c:
-			if got != i {
-				t.Fatalf("wrong delivery order - got: %v, want: %v", got, i)
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("missing message: %v", i)
-		}
+func verifyNextMessagesRange(t *testing.T, sub Subscription, from, to int) {
+	t.Helper()
+	for msg := from; msg < to; msg++ {
+		verifyNextMessage(t, sub, msg)
 	}
 	select {
-	case x := <-c:
+	case x := <-sub.C():
 		t.Fatalf("received unexpected message: %v", x)
 	default:
+	}
+}
+
+func verifyNextMessages(t *testing.T, sub Subscription, messages ...int) {
+	t.Helper()
+	for _, msg := range messages {
+		verifyNextMessage(t, sub, msg)
+	}
+	select {
+	case x := <-sub.C():
+		t.Fatalf("received unexpected message: %v", x)
+	default:
+	}
+}
+
+func verifyNextMessage(t *testing.T, sub Subscription, msg int) {
+	t.Helper()
+	select {
+	case got := <-sub.C():
+		if got != msg {
+			t.Fatalf("wrong delivery order - got: %v, want: %v", got, msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("missing message: %v", msg)
 	}
 }
 

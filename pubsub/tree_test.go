@@ -38,7 +38,7 @@ func TestTopicTreeRoot(t *testing.T) {
 	tt.Publish("/a", 2)
 	tt.Publish("/b", 3)
 
-	verifyNextMessages(t, sub, 1, 4)
+	verifyNextMessages(t, sub, 1, 2, 3)
 
 	sub.Unsubscribe()
 
@@ -174,18 +174,48 @@ func TestPublishOnAllLevels(t *testing.T) {
 	ab := tt.Subscribe("/a/b")
 	abc := tt.Subscribe("/a/b/c")
 
-	tt.Publish("/a/b/c/d", 1)
-	tt.Publish("/a/b/c", 2)
-	tt.Publish("/a/b", 3)
-	tt.Publish("/a", 4)
+	tt.Publish("a/b/c/d", 1)
+	tt.Publish("a/b/c", 2)
+	tt.Publish("a/b", 3)
+	tt.Publish("a", 4)
 
-	verifyNextMessages(t, a, 1, 5)
-	verifyNextMessages(t, ab, 1, 4)
-	verifyNextMessages(t, abc, 1, 3)
+	verifyNextMessages(t, a, 1, 2, 3, 4)
+	verifyNextMessages(t, ab, 1, 2, 3)
+	verifyNextMessages(t, abc, 1, 2)
 
 	a.Unsubscribe()
 	ab.Unsubscribe()
 	abc.Unsubscribe()
+}
+
+func TestPublishSubscribeWithPath(t *testing.T) {
+	tt := NewTopicTree()
+	verifyTopicTree(t, tt, map[string]int{"/": 0})
+
+	ab := tt.SubscribePath([]string{"a", "b"})
+	xy := tt.SubscribePath([]string{"x", "y"})
+
+	all1 := tt.SubscribePath(nil)
+	all2 := tt.SubscribePath([]string{})
+
+	verifyTopicTree(t, tt, map[string]int{
+		"/":    2,
+		"/a":   0,
+		"/a/b": 1,
+		"/x":   0,
+		"/x/y": 1,
+	})
+
+	tt.PublishPath(nil, 1)
+	tt.PublishPath([]string{"no-listeners"}, 2)
+	tt.PublishPath([]string{"a", "b"}, 3)
+	tt.PublishPath([]string{"x", "y"}, 4)
+
+	verifyNextMessages(t, ab, 3)
+	verifyNextMessages(t, xy, 4)
+
+	verifyNextMessages(t, all1, 1, 2, 3, 4)
+	verifyNextMessages(t, all2, 1, 2, 3, 4)
 }
 
 const debugGoroutines = false
