@@ -166,6 +166,28 @@ func TestTopicTreeList(t *testing.T) {
 	verifyTopicTree(t, tt, map[string]int{"/": 0})
 }
 
+func TestPublishOnAllLevels(t *testing.T) {
+	tt := NewTopicTree()
+	verifyTopicTree(t, tt, map[string]int{"/": 0})
+
+	a := tt.Subscribe("/a")
+	ab := tt.Subscribe("/a/b")
+	abc := tt.Subscribe("/a/b/c")
+
+	tt.Publish("/a/b/c/d", 1)
+	tt.Publish("/a/b/c", 2)
+	tt.Publish("/a/b", 3)
+	tt.Publish("/a", 4)
+
+	verifyNextMessages(t, a, 1, 5)
+	verifyNextMessages(t, ab, 1, 4)
+	verifyNextMessages(t, abc, 1, 3)
+
+	a.Unsubscribe()
+	ab.Unsubscribe()
+	abc.Unsubscribe()
+}
+
 const debugGoroutines = false
 
 func TestMain(m *testing.M) {

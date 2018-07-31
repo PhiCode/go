@@ -30,21 +30,24 @@ type TopicTree interface {
 	SubscribePath(path []string) Subscription
 
 	//TODO: per level/subscriber/global? scrap altogether ?
-	//NumSubscribers(path string) int
-
-	//TODO: per level/subscriber/global? scrap altogether ?
 	//SetHWM(path string, hwm int, recursive bool)
+	//GetHWM(path string) (hwm int, recursive bool)
 
 	//TODO: subscriptions where the path of the received message is communicated
 
+	// List the entire topic tree and the amount of subscribers currently on a specific level.
+	// Intermediate levels with no active subscribers are also listed (with a value of 0).
 	List() map[string]int
 }
 
 type tt struct {
+	// the topic which receives messages for this level
 	topic Topic
 
-	rwmu  sync.RWMutex
-	refs  int64 // the number of subscriptions on this level or on child trees
+	rwmu sync.RWMutex
+	// the number of subscriptions on this level and all child trees
+	refs int64
+	// all child nodes
 	leafs map[string]*tt
 }
 
@@ -54,22 +57,24 @@ func NewTopicTree() TopicTree { return newtt() }
 
 func (t *tt) Publish(treePath string, msg interface{}) {
 	path := path.Split(treePath)
-	t.PublishPath(path, msg)
+	t.publish(path, 0, msg)
 }
 func (t *tt) PublishPath(path []string, msg interface{}) {
 	t.publish(path, 0, msg)
 }
 
 // publishing:
-// - walk the tree until the final leaf is reached
+// - walk the tree until the destination leaf is reached
 // - publish the message on the topics of all leafs on the way
 func (t *tt) publish(p []string, depth int, msg interface{}) {
+
+	// publish message on the current tree level
 	t.topic.Publish(msg)
 
 	t.rwmu.RLock()
 	defer t.rwmu.RUnlock()
 
-	if len(p) > depth {
+	if len(p) > depth && t.leafs != nil {
 		elem := p[depth]
 		if leaf, ok := t.leafs[elem]; ok {
 			leaf.publish(p, depth+1, msg)
@@ -102,6 +107,9 @@ func (t *tt) subscribe(root *tt, path []string, depth int) Subscription {
 	if len(path) > depth {
 		// subscription is not for this level, propagate to the next level in the hierarchy
 		elem := path[depth]
+		if t.leafs == nil {
+			t.leafs = make(map[string]*tt)
+		}
 		leaf, ok := t.leafs[elem]
 		if !ok {
 			leaf = newtt()
@@ -128,7 +136,7 @@ func (t *tt) unsubscribe(path []string, depth int) int64 {
 
 	t.refs--
 
-	if len(path) > depth {
+	if len(path) > depth && t.leafs != nil {
 		// subscription is not for this level, propagate to the next level in the hierarchy
 		elem := path[depth]
 		leaf, ok := t.leafs[elem]
@@ -137,6 +145,9 @@ func (t *tt) unsubscribe(path []string, depth int) int64 {
 		}
 		if leaf.unsubscribe(path, depth+1) == 0 {
 			delete(t.leafs, elem)
+		}
+		if len(t.leafs) == 0 {
+			t.leafs = nil
 		}
 	}
 
@@ -157,8 +168,10 @@ func (t *tt) list(m map[string]int, path string) {
 	if len(path) > 1 {
 		path += "/"
 	}
-	for leafPath, leaf := range t.leafs {
-		leaf.list(m, path+leafPath)
+	if t.leafs != nil {
+		for leafPath, leaf := range t.leafs {
+			leaf.list(m, path+leafPath)
+		}
 	}
 }
 
@@ -185,6 +198,6 @@ func (s *ttsub) Unsubscribe() bool {
 func newtt() *tt {
 	return &tt{
 		topic: NewTopic(),
-		leafs: make(map[string]*tt),
+		//leafs: make(map[string]*tt),
 	}
 }

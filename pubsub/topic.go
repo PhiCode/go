@@ -43,14 +43,17 @@ type Subscription interface {
 }
 
 // NewTopic creates a new message topic.
-// No high water mark is set, consumers which are lagging behind will no loose messages.
+// No high water mark is set, consumers which are lagging behind will not loose messages.
 func NewTopic() Topic { return &topic{head: newMsg()} }
 
 type topic struct {
-	nsub int64 // number of subscribers - atomically mutated
+	// number of subscribers - atomically mutated
+	nsub int64
 
-	mu   sync.Mutex
-	head *msg // head of message chain
+	mu sync.Mutex
+
+	// head of message chain
+	head *msg
 }
 
 var _ Topic = (*topic)(nil)
