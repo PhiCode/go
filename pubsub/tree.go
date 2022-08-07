@@ -14,20 +14,20 @@ import (
 // - the root level to receive all messages
 // - a 'leaf' level to receive a subset of messages, filtered for the specific path
 // Published messages are delivered to the root and all leafs of the publishing path.
-type TopicTree interface {
+type TopicTree[M any] interface {
 	// Publish publishes a new message to the tree.
 	// Publish panics if the supplied path is not valid.
-	Publish(path string, msg interface{})
+	Publish(path string, msg M)
 
 	// PublishPath publishes a new message to the tree.
-	PublishPath(path []string, msg interface{})
+	PublishPath(path []string, msg M)
 
 	// Subscribe creates a new Subscription on the tree.
 	// Subscribe panics if the supplied path is not valid.
-	Subscribe(path string) Subscription
+	Subscribe(path string) Subscription[M]
 
 	// SubscribePath creates a new Subscription on the tree.
-	SubscribePath(path []string) Subscription
+	SubscribePath(path []string) Subscription[M]
 
 	//TODO: per level/subscriber/global? scrap altogether ?
 	//SetHWM(path string, hwm int, recursive bool)
@@ -40,33 +40,33 @@ type TopicTree interface {
 	List() map[string]int
 }
 
-type tt struct {
+type tt[M any] struct {
 	// the topic which receives messages for this level
-	topic Topic
+	topic Topic[M]
 
 	rwmu sync.RWMutex
 	// the number of subscriptions on this level and all child trees
 	refs int64
 	// all child nodes
-	leafs map[string]*tt
+	leafs map[string]*tt[M]
 }
 
-var _ (TopicTree) = (*tt)(nil)
+var _ TopicTree[any] = (*tt[any])(nil)
 
-func NewTopicTree() TopicTree { return newtt() }
+func NewTopicTree[M any]() TopicTree[M] { return newtt[M]() }
 
-func (t *tt) Publish(treePath string, msg interface{}) {
+func (t *tt[M]) Publish(treePath string, msg M) {
 	path := path.Split(treePath)
 	t.publish(path, 0, msg)
 }
-func (t *tt) PublishPath(path []string, msg interface{}) {
+func (t *tt[M]) PublishPath(path []string, msg M) {
 	t.publish(path, 0, msg)
 }
 
 // publishing:
 // - walk the tree until the destination leaf is reached
 // - publish the message on the topics of all leafs on the way
-func (t *tt) publish(p []string, depth int, msg interface{}) {
+func (t *tt[M]) publish(p []string, depth int, msg M) {
 
 	// publish message on the current tree level
 	t.topic.Publish(msg)
@@ -82,11 +82,11 @@ func (t *tt) publish(p []string, depth int, msg interface{}) {
 	}
 }
 
-func (t *tt) Subscribe(treePath string) Subscription {
+func (t *tt[M]) Subscribe(treePath string) Subscription[M] {
 	path := path.Split(treePath)
 	return t.subscribe(t, path, 0)
 }
-func (t *tt) SubscribePath(path []string) Subscription {
+func (t *tt[M]) SubscribePath(path []string) Subscription[M] {
 	// defensive copy for externally supplied paths on subscriptions
 	p := make([]string, len(path))
 	copy(p, path)
@@ -98,7 +98,7 @@ func (t *tt) SubscribePath(path []string) Subscription {
 // - walk the tree until the requested leaf is reached
 // - create non-existent leafs on the way
 // - register on the leafs topic
-func (t *tt) subscribe(root *tt, path []string, depth int) Subscription {
+func (t *tt[M]) subscribe(root *tt[M], path []string, depth int) Subscription[M] {
 	t.rwmu.Lock()
 	defer t.rwmu.Unlock()
 
@@ -108,18 +108,18 @@ func (t *tt) subscribe(root *tt, path []string, depth int) Subscription {
 		// subscription is not for this level, propagate to the next level in the hierarchy
 		elem := path[depth]
 		if t.leafs == nil {
-			t.leafs = make(map[string]*tt)
+			t.leafs = make(map[string]*tt[M])
 		}
 		leaf, ok := t.leafs[elem]
 		if !ok {
-			leaf = newtt()
+			leaf = newtt[M]()
 			t.leafs[elem] = leaf
 		}
 		return leaf.subscribe(root, path, depth+1)
 	}
 
 	s := t.topic.Subscribe()
-	return &ttsub{
+	return &ttsub[M]{
 		root: root,
 		p:    path,
 		s:    s,
@@ -130,7 +130,7 @@ func (t *tt) subscribe(root *tt, path []string, depth int) Subscription {
 // - walk the tree until the final leaf is reached
 // - unsubscribe from the leaf
 // - remove all unused leafs
-func (t *tt) unsubscribe(path []string, depth int) int64 {
+func (t *tt[M]) unsubscribe(path []string, depth int) int64 {
 	t.rwmu.Lock()
 	defer t.rwmu.Unlock()
 
@@ -154,13 +154,13 @@ func (t *tt) unsubscribe(path []string, depth int) int64 {
 	return t.refs
 }
 
-func (t *tt) List() map[string]int {
+func (t *tt[M]) List() map[string]int {
 	m := make(map[string]int)
 	t.list(m, "/")
 	return m
 }
 
-func (t *tt) list(m map[string]int, path string) {
+func (t *tt[M]) list(m map[string]int, path string) {
 	t.rwmu.RLock()
 	defer t.rwmu.RUnlock()
 
@@ -175,19 +175,19 @@ func (t *tt) list(m map[string]int, path string) {
 	}
 }
 
-type ttsub struct {
-	root *tt
+type ttsub[M any] struct {
+	root *tt[M]
 	p    []string
-	s    Subscription
+	s    Subscription[M]
 }
 
-var _ Subscription = (*ttsub)(nil)
+var _ Subscription[any] = (*ttsub[any])(nil)
 
-func (s *ttsub) C() <-chan interface{} {
+func (s *ttsub[M]) C() <-chan M {
 	return s.s.C()
 }
 
-func (s *ttsub) Unsubscribe() bool {
+func (s *ttsub[M]) Unsubscribe() bool {
 	if !s.s.Unsubscribe() {
 		return false
 	}
@@ -195,9 +195,9 @@ func (s *ttsub) Unsubscribe() bool {
 	return true
 }
 
-func newtt() *tt {
-	return &tt{
-		topic: NewTopic(),
+func newtt[M any]() *tt[M] {
+	return &tt[M]{
+		topic: NewTopic[M](),
 		//leafs: make(map[string]*tt),
 	}
 }

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func verifyTopicTree(t *testing.T, tt TopicTree, m map[string]int) {
+func verifyTopicTree[M any](t *testing.T, tt TopicTree[M], m map[string]int) {
 	got := tt.List()
 	//t.Logf("%+v",got)
 	if len(got) != len(m) {
@@ -27,7 +27,7 @@ func verifyTopicTree(t *testing.T, tt TopicTree, m map[string]int) {
 }
 
 func TestTopicTreeRoot(t *testing.T) {
-	tt := NewTopicTree()
+	tt := NewTopicTree[int]()
 	sub := tt.Subscribe("/")
 	if sub == nil {
 		t.Fatal("subscribe failed")
@@ -44,7 +44,7 @@ func TestTopicTreeRoot(t *testing.T) {
 
 	verifyTopicTree(t, tt, map[string]int{"/": 0})
 
-	tt.Publish("/", "stuff")
+	tt.Publish("/", 4)
 
 	select {
 	case got, ok := <-sub.C():
@@ -56,7 +56,7 @@ func TestTopicTreeRoot(t *testing.T) {
 }
 
 func TestTopicTreeSubNode(t *testing.T) {
-	tt := NewTopicTree()
+	tt := NewTopicTree[string]()
 	sub := tt.Subscribe("/a")
 	if sub == nil {
 		t.Fatal("subscribe failed")
@@ -80,7 +80,7 @@ func TestTopicTreeSubNode(t *testing.T) {
 }
 
 func TestTopicDoubleUnsubscribe(t *testing.T) {
-	tt := NewTopicTree()
+	tt := NewTopicTree[string]()
 	sub1 := tt.Subscribe("/a")
 	sub2 := tt.Subscribe("/a")
 	if sub1 == nil || sub2 == nil {
@@ -112,7 +112,7 @@ func TestTopicDoubleUnsubscribe(t *testing.T) {
 }
 
 func TestTopicTreeList(t *testing.T) {
-	tt := NewTopicTree()
+	tt := NewTopicTree[string]()
 	verifyTopicTree(t, tt, map[string]int{"/": 0})
 
 	abc := tt.Subscribe("/a/b/c")
@@ -167,7 +167,7 @@ func TestTopicTreeList(t *testing.T) {
 }
 
 func TestPublishOnAllLevels(t *testing.T) {
-	tt := NewTopicTree()
+	tt := NewTopicTree[int]()
 	verifyTopicTree(t, tt, map[string]int{"/": 0})
 
 	a := tt.Subscribe("/a")
@@ -189,7 +189,7 @@ func TestPublishOnAllLevels(t *testing.T) {
 }
 
 func TestPublishSubscribeWithPath(t *testing.T) {
-	tt := NewTopicTree()
+	tt := NewTopicTree[int]()
 	verifyTopicTree(t, tt, map[string]int{"/": 0})
 
 	ab := tt.SubscribePath([]string{"a", "b"})

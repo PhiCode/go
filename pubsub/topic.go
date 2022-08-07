@@ -11,13 +11,13 @@ import (
 
 // A Topic is used to distribute messages to multiple consumers.
 // Published messages are delivered in publishing order.
-// If an optional "high water mark" (HWM) is set, messages for slow consumsers may be dropped.
-type Topic interface {
+// If an optional "high water mark" (HWM) is set, messages for slow consumers may be dropped.
+type Topic[M any] interface {
 	// Publish publishes a new message to all subscribers.
-	Publish(msg interface{})
+	Publish(msg M)
 
 	// Subscribe creates a new Subscription on which newly published messages can be received.
-	Subscribe() Subscription
+	Subscribe() Subscription[M]
 
 	// NumSubscribers returns the current number of subscribers.
 	NumSubscribers() int
@@ -31,11 +31,11 @@ type Topic interface {
 
 // Subscription is the topic subscription of one consumer.
 // Messages which are published on the subscribed Topic are delivered at most once but may be consumed from any goroutine.
-type Subscription interface {
+type Subscription[M any] interface {
 	// C returns the receive-only consumer channel on which newly published messages are received.
 	// Unsubscribing from a Subscription will close this consumer channel.
 	// The consumer channel can therefore be used in a for-range construct.
-	C() <-chan interface{}
+	C() <-chan M
 
 	// Unsubscribe frees the resources which are associated with this Subscription.
 	// Consumers must call Unsubscribe to prevent memory/goroutine leaks.
@@ -44,21 +44,21 @@ type Subscription interface {
 
 // NewTopic creates a new message topic.
 // No high water mark is set, consumers which are lagging behind will not loose messages.
-func NewTopic() Topic { return &topic{head: newMsg()} }
+func NewTopic[M any]() Topic[M] { return &topic[M]{head: newMsg[M]()} }
 
-type topic struct {
+type topic[M any] struct {
 	// number of subscribers - atomically mutated
 	nsub int64
 
 	mu sync.Mutex
 
 	// head of message chain
-	head *msg
+	head *msg[M]
 }
 
-var _ Topic = (*topic)(nil)
+var _ Topic[int] = (*topic[int])(nil)
 
-func (t *topic) Publish(msg interface{}) {
+func (t *topic[M]) Publish(msg M) {
 	if atomic.LoadInt64(&t.nsub) <= 0 {
 		return
 	}
@@ -66,7 +66,7 @@ func (t *topic) Publish(msg interface{}) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	oldHead, newHead := t.head, newMsg()
+	oldHead, newHead := t.head, newMsg[M]()
 
 	newHead.seq = oldHead.seq + 1
 	newHead.hwm = oldHead.hwm
@@ -79,27 +79,27 @@ func (t *topic) Publish(msg interface{}) {
 	close(oldHead.ready)
 }
 
-func (t *topic) NumSubscribers() int {
+func (t *topic[M]) NumSubscribers() int {
 	return int(atomic.LoadInt64(&t.nsub))
 }
 
-func (t *topic) Subscribe() Subscription {
+func (t *topic[M]) Subscribe() Subscription[M] {
 	t.mu.Lock()
 	head := t.head
 	atomic.AddInt64(&t.nsub, 1)
 	t.mu.Unlock()
 
-	sub := &sub{
+	sub := &sub[M]{
 		subscribed: 1,
 		t:          t,
-		recv:       make(chan interface{}),
+		recv:       make(chan M),
 		stop:       make(chan struct{}),
 	}
 	go sub.loop(head)
 	return sub
 }
 
-func (t *topic) SetHWM(hwm int) {
+func (t *topic[M]) SetHWM(hwm int) {
 	t.mu.Lock()
 	t.head.hwm = int64(hwm)
 	t.mu.Unlock()
@@ -108,28 +108,28 @@ func (t *topic) SetHWM(hwm int) {
 // forward referencing message chain
 // the ready channel is closed upon message readyness
 // consumers select upon the ready channel
-type msg struct {
+type msg[M any] struct {
 	seq   int64         // message sequence number
 	ready chan struct{} // guards the fields below, a closed ready channel is indicative of message readiness
 	hwm   int64         // high water mark at message creation time
-	msg   interface{}   // the published message
-	next  *msg          // the next message holder object in the chain of published messages
+	msg   M             // the published message
+	next  *msg[M]       // the next message holder object in the chain of published messages
 }
 
-func newMsg() *msg { return &msg{ready: make(chan struct{})} }
+func newMsg[M any]() *msg[M] { return &msg[M]{ready: make(chan struct{})} }
 
-type sub struct {
+type sub[M any] struct {
 	subscribed int32
-	t          *topic
-	recv       chan interface{} // consumer receive channel
-	stop       chan struct{}    // unsubscribe and end subscriber loop notification channel
+	t          *topic[M]
+	recv       chan M        // consumer receive channel
+	stop       chan struct{} // unsubscribe and end subscriber loop notification channel
 }
 
-var _ Subscription = (*sub)(nil)
+var _ Subscription[int] = (*sub[int])(nil)
 
-func (s *sub) C() <-chan interface{} { return s.recv }
+func (s *sub[M]) C() <-chan M { return s.recv }
 
-func (s *sub) Unsubscribe() bool {
+func (s *sub[M]) Unsubscribe() bool {
 	if !atomic.CompareAndSwapInt32(&s.subscribed, 1, 0) {
 		return false
 	}
@@ -139,10 +139,10 @@ func (s *sub) Unsubscribe() bool {
 	return true
 }
 
-func (s *sub) loop(head *msg) {
+func (s *sub[M]) loop(head *msg[M]) {
 	defer close(s.recv)
 
-	var cur *msg
+	var cur *msg[M]
 	for {
 		if cur == nil {
 			// receive next message or stop
@@ -174,7 +174,7 @@ func (s *sub) loop(head *msg) {
 
 // discards messages which have a message lag higher than the HWM.
 // the subscribers current message must be ready.
-func hwmCheck(cur, newest *msg) *msg {
+func hwmCheck[M any](cur, newest *msg[M]) *msg[M] {
 	if newest.hwm < 1 {
 		return cur
 	}

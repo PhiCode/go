@@ -10,7 +10,7 @@ import (
 )
 
 func TestReceive(t *testing.T) {
-	topic := NewTopic()
+	topic := NewTopic[string]()
 	sub := topic.Subscribe()
 	topic.Publish("a")
 	topic.Publish("b")
@@ -22,13 +22,13 @@ func TestReceive(t *testing.T) {
 	// give the sender goroutine the opportunity to shut down
 	time.Sleep(25 * time.Millisecond)
 	b, ok := <-sub.C()
-	if b != nil || ok {
+	if ok {
 		t.Errorf("unsubscribed subscription receive got (%v, %v), want: (nil, false)", b, ok)
 	}
 }
 
 func TestNumSubscribers(t *testing.T) {
-	topic := NewTopic()
+	topic := NewTopic[string]()
 	topic.Publish("stuff")
 	sub1 := topic.Subscribe()
 	if n := topic.NumSubscribers(); n != 1 {
@@ -59,7 +59,7 @@ func TestNumSubscribers(t *testing.T) {
 
 func TestMessageOrder(t *testing.T) {
 	const N = 1000
-	topic := NewTopic()
+	topic := NewTopic[int]()
 	sub := topic.Subscribe()
 	defer sub.Unsubscribe()
 	go func() {
@@ -71,7 +71,7 @@ func TestMessageOrder(t *testing.T) {
 }
 
 func TestHighWaterMark(t *testing.T) {
-	topic := NewTopic()
+	topic := NewTopic[int]()
 	topic.SetHWM(1)
 
 	sub := topic.Subscribe()
@@ -98,7 +98,7 @@ func TestHighWaterMark(t *testing.T) {
 	verifyNextMessagesRange(t, sub, 90, 100)
 }
 
-func verifyNextMessagesRange(t *testing.T, sub Subscription, from, to int) {
+func verifyNextMessagesRange(t *testing.T, sub Subscription[int], from, to int) {
 	t.Helper()
 	for msg := from; msg < to; msg++ {
 		verifyNextMessage(t, sub, msg)
@@ -110,7 +110,7 @@ func verifyNextMessagesRange(t *testing.T, sub Subscription, from, to int) {
 	}
 }
 
-func verifyNextMessages(t *testing.T, sub Subscription, messages ...int) {
+func verifyNextMessages(t *testing.T, sub Subscription[int], messages ...int) {
 	t.Helper()
 	for _, msg := range messages {
 		verifyNextMessage(t, sub, msg)
@@ -122,7 +122,7 @@ func verifyNextMessages(t *testing.T, sub Subscription, messages ...int) {
 	}
 }
 
-func verifyNextMessage(t *testing.T, sub Subscription, msg int) {
+func verifyNextMessage(t *testing.T, sub Subscription[int], msg int) {
 	t.Helper()
 	select {
 	case got := <-sub.C():
@@ -140,7 +140,7 @@ func BenchmarkPublishReceive50kSub(b *testing.B)  { benchPublishReceive(b, 50000
 func BenchmarkPublishReceive100kSub(b *testing.B) { benchPublishReceive(b, 100000) }
 
 func benchPublishReceive(b *testing.B, consumers int) {
-	topic := NewTopic()
+	topic := NewTopic[int]()
 	var wg sync.WaitGroup
 	wg.Add(consumers)
 	for j := 0; j < consumers; j++ {
@@ -158,12 +158,12 @@ func benchPublishReceive(b *testing.B, consumers int) {
 	wg.Wait()
 }
 
-func benchConsumer(b *testing.B, sub Subscription, wg *sync.WaitGroup, numMsg int) {
+func benchConsumer(b *testing.B, sub Subscription[int], wg *sync.WaitGroup, numMsg int) {
 	defer sub.Unsubscribe()
 	var sum int
 	c := sub.C()
 	for i := 0; i < numMsg; i++ {
-		sum += (<-c).(int)
+		sum += <-c
 	}
 	var wsum = (numMsg * (numMsg + 1)) / 2
 	if sum != wsum {
