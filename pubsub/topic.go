@@ -43,7 +43,7 @@ type Subscription[M any] interface {
 }
 
 // NewTopic creates a new message topic.
-// No high water mark is set, consumers which are lagging behind will not loose messages.
+// No high water mark is set, consumers which are lagging behind will not miss messages.
 func NewTopic[M any]() Topic[M] { return &topic[M]{head: newMsg[M]()} }
 
 type topic[M any] struct {
@@ -106,7 +106,7 @@ func (t *topic[M]) SetHWM(hwm int) {
 }
 
 // forward referencing message chain
-// the ready channel is closed upon message readyness
+// the ready channel is closed upon message readiness
 // consumers select upon the ready channel
 type msg[M any] struct {
 	seq   int64         // message sequence number

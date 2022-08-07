@@ -56,8 +56,8 @@ var _ TopicTree[any] = (*tt[any])(nil)
 func NewTopicTree[M any]() TopicTree[M] { return newtt[M]() }
 
 func (t *tt[M]) Publish(treePath string, msg M) {
-	path := path.Split(treePath)
-	t.publish(path, 0, msg)
+	p := path.Split(treePath)
+	t.publish(p, 0, msg)
 }
 func (t *tt[M]) PublishPath(path []string, msg M) {
 	t.publish(path, 0, msg)
@@ -83,8 +83,8 @@ func (t *tt[M]) publish(p []string, depth int, msg M) {
 }
 
 func (t *tt[M]) Subscribe(treePath string) Subscription[M] {
-	path := path.Split(treePath)
-	return t.subscribe(t, path, 0)
+	p := path.Split(treePath)
+	return t.subscribe(t, p, 0)
 }
 func (t *tt[M]) SubscribePath(path []string) Subscription[M] {
 	// defensive copy for externally supplied paths on subscriptions
