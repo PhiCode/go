@@ -12,8 +12,8 @@ import (
 // A TopicTree is a hierarchical structure of topics.
 // Subscriber can subscribe on:
 // - the root level to receive all messages
-// - a 'leaf' level to receive a subset of messages, filtered for the specific path
-// Published messages are delivered to the root and all leafs of the publishing path.
+// - a sub-level to receive a subset of messages, filtered for the specific path
+// Published messages are delivered to the root and all path elements of the publishing path.
 type TopicTree[M any] interface {
 	// Publish publishes a new message to the tree.
 	// Publish panics if the supplied path is not valid.
