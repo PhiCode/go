@@ -1,12 +1,7 @@
-// Copyright 2015 Philipp Meinen. All rights reserved.
-// Use of this source code is governed by the MIT license that can be found in the LICENSE file.
-
 package pubsub
 
 import (
 	"sync"
-
-	"github.com/phicode/go/path"
 )
 
 // A TopicTree is a hierarchical structure of topics.
@@ -20,14 +15,14 @@ type TopicTree[M any] interface {
 	Publish(path string, msg M)
 
 	// PublishPath publishes a new message to the tree.
-	PublishPath(path []string, msg M)
+	PublishPath(path Path, msg M)
 
 	// Subscribe creates a new Subscription on the tree.
 	// Subscribe panics if the supplied path is not valid.
 	Subscribe(path string) Subscription[M]
 
 	// SubscribePath creates a new Subscription on the tree.
-	SubscribePath(path []string) Subscription[M]
+	SubscribePath(path Path) Subscription[M]
 
 	//TODO: per level/subscriber/global? scrap altogether ?
 	//SetHWM(path string, hwm int, recursive bool)
@@ -56,17 +51,17 @@ var _ TopicTree[any] = (*tt[any])(nil)
 func NewTopicTree[M any]() TopicTree[M] { return newtt[M]() }
 
 func (t *tt[M]) Publish(treePath string, msg M) {
-	p := path.Split(treePath)
+	p := ParsePath(treePath)
 	t.publish(p, 0, msg)
 }
-func (t *tt[M]) PublishPath(path []string, msg M) {
+func (t *tt[M]) PublishPath(path Path, msg M) {
 	t.publish(path, 0, msg)
 }
 
 // publishing:
 // - walk the tree until the destination leaf is reached
 // - publish the message on the topics of all leafs on the way
-func (t *tt[M]) publish(p []string, depth int, msg M) {
+func (t *tt[M]) publish(p Path, depth int, msg M) {
 
 	// publish message on the current tree level
 	t.topic.Publish(msg)
@@ -83,12 +78,12 @@ func (t *tt[M]) publish(p []string, depth int, msg M) {
 }
 
 func (t *tt[M]) Subscribe(treePath string) Subscription[M] {
-	p := path.Split(treePath)
+	p := ParsePath(treePath)
 	return t.subscribe(t, p, 0)
 }
-func (t *tt[M]) SubscribePath(path []string) Subscription[M] {
+func (t *tt[M]) SubscribePath(path Path) Subscription[M] {
 	// defensive copy for externally supplied paths on subscriptions
-	p := make([]string, len(path))
+	p := make(Path, len(path))
 	copy(p, path)
 
 	return t.subscribe(t, p, 0)
@@ -98,7 +93,7 @@ func (t *tt[M]) SubscribePath(path []string) Subscription[M] {
 // - walk the tree until the requested leaf is reached
 // - create non-existent leafs on the way
 // - register on the leafs topic
-func (t *tt[M]) subscribe(root *tt[M], path []string, depth int) Subscription[M] {
+func (t *tt[M]) subscribe(root *tt[M], path Path, depth int) Subscription[M] {
 	t.rwmu.Lock()
 	defer t.rwmu.Unlock()
 
@@ -130,7 +125,7 @@ func (t *tt[M]) subscribe(root *tt[M], path []string, depth int) Subscription[M]
 // - walk the tree until the final leaf is reached
 // - unsubscribe from the leaf
 // - remove all unused leafs
-func (t *tt[M]) unsubscribe(path []string, depth int) int64 {
+func (t *tt[M]) unsubscribe(path Path, depth int) int64 {
 	t.rwmu.Lock()
 	defer t.rwmu.Unlock()
 
@@ -177,7 +172,7 @@ func (t *tt[M]) list(m map[string]int, path string) {
 
 type ttsub[M any] struct {
 	root *tt[M]
-	p    []string
+	p    Path
 	s    Subscription[M]
 }
 

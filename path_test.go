@@ -1,17 +1,14 @@
-// Copyright 2015 Philipp Meinen. All rights reserved.
-// Use of this source code is governed by the MIT license that can be found in the LICENSE file.
-
-package path
+package pubsub
 
 import (
 	"testing"
 )
 
-func TestSplit(t *testing.T) {
+func TestParsePath(t *testing.T) {
 	var tests = []struct {
 		path string
 
-		out []string
+		out Path
 	}{
 		{"", []string{}},
 		{"/", []string{}},
@@ -31,7 +28,7 @@ func TestSplit(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		path := Split(test.path)
+		path := ParsePath(test.path)
 		if len(test.out) != len(path) {
 			t.Errorf("invalid path length, want=%d (%v), got=%d (%v)", len(test.out), test.out, len(path), path)
 			continue

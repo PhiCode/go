@@ -1,7 +1,4 @@
-// Copyright 2015 Philipp Meinen. All rights reserved.
-// Use of this source code is governed by the MIT license that can be found in the LICENSE file.
-
-package path
+package pubsub
 
 import (
 	"path"
@@ -13,7 +10,9 @@ var emptyStringSlice = []string{}
 const pathSeparator = '/'
 const pathSeparatorString = "/"
 
-func Split(p string) []string {
+type Path []string
+
+func ParsePath(p string) Path {
 	if p == "" {
 		return emptyStringSlice
 	}
@@ -29,16 +28,16 @@ func Split(p string) []string {
 	}
 
 	elems := strings.Count(p, pathSeparatorString) + 1
-	var path = make([]string, elems)
+	parsed := make(Path, elems)
 
 	for i := 0; i < elems; i++ {
 		end := strings.IndexByte(p, pathSeparator)
 		if end == -1 {
-			path[i] = p
+			parsed[i] = p
 		} else {
-			path[i] = p[:end]
+			parsed[i] = p[:end]
 			p = p[end+1:]
 		}
 	}
-	return path
+	return parsed
 }
